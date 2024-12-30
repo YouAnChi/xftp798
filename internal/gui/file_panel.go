@@ -2,10 +2,12 @@ package gui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"xftp798/internal/transfer"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
@@ -23,7 +25,37 @@ type FilePanel struct {
 	selectedItem int
 	progressBar  *widget.ProgressBar
 	transferMgr  *transfer.TransferManager
-	onTransfer   func(source string, targetPanel *FilePanel) // 传输回调
+	onTransfer   func(source string, targetPanel *FilePanel, transferType transfer.TransferType)
+}
+
+// DropArea 自定义拖放区域
+type DropArea struct {
+	widget.BaseWidget
+	panel    *FilePanel
+	callback func(string)
+}
+
+// NewDropArea 创建新的拖放区域
+func NewDropArea(panel *FilePanel) *DropArea {
+	area := &DropArea{panel: panel}
+	area.ExtendBaseWidget(area)
+	return area
+}
+
+// CreateRenderer 实现 Widget 接口
+func (d *DropArea) CreateRenderer() fyne.WidgetRenderer {
+	rect := canvas.NewRectangle(theme.BackgroundColor())
+	return widget.NewSimpleRenderer(rect)
+}
+
+// Tapped 处理点击事件
+func (d *DropArea) Tapped(e *fyne.PointEvent) {
+	if d.panel.selectedItem >= 0 && d.panel.selectedItem < len(d.panel.currentFiles) {
+		file := d.panel.currentFiles[d.panel.selectedItem]
+		if d.panel.onTransfer != nil {
+			d.panel.onTransfer(file.Path, d.panel, transfer.Copy)
+		}
+	}
 }
 
 // NewFilePanel 创建新的文件面板
@@ -90,7 +122,7 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 		},
 	)
 
-	// 添加列表选择事件
+	// 设置列表选择事件
 	panel.list.OnSelected = func(id widget.ListItemID) {
 		panel.selectedItem = int(id)
 		if id >= len(panel.currentFiles) {
@@ -128,6 +160,31 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 				panel.window,
 			)
 		}),
+		widget.NewToolbarAction(theme.DocumentCreateIcon(), func() {
+			if panel.selectedItem < 0 || panel.selectedItem >= len(panel.currentFiles) {
+				return
+			}
+			file := panel.currentFiles[panel.selectedItem]
+			entry := widget.NewEntry()
+			entry.SetText(file.Name)
+			dialog.ShowForm("重命名", "确定", "取消",
+				[]*widget.FormItem{
+					widget.NewFormItem("新名称", entry),
+				},
+				func(confirm bool) {
+					if confirm {
+						oldPath := file.Path
+						newPath := filepath.Join(filepath.Dir(file.Path), entry.Text)
+						if err := os.Rename(oldPath, newPath); err != nil {
+							dialog.ShowError(err, panel.window)
+						} else {
+							panel.RefreshFiles()
+						}
+					}
+				},
+				panel.window,
+			)
+		}),
 		widget.NewToolbarAction(theme.DeleteIcon(), func() {
 			if panel.selectedItem < 0 || panel.selectedItem >= len(panel.currentFiles) {
 				return
@@ -155,16 +212,28 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 			}
 			if panel.onTransfer != nil {
 				file := panel.currentFiles[panel.selectedItem]
-				panel.onTransfer(file.Path, panel)
+				panel.onTransfer(file.Path, panel, transfer.Copy)
+			}
+		}),
+		widget.NewToolbarAction(theme.ContentCutIcon(), func() {
+			if panel.selectedItem < 0 || panel.selectedItem >= len(panel.currentFiles) {
+				return
+			}
+			if panel.onTransfer != nil {
+				file := panel.currentFiles[panel.selectedItem]
+				panel.onTransfer(file.Path, panel, transfer.Move)
 			}
 		}),
 	)
+
+	// 创建拖放区域
+	dropArea := NewDropArea(panel)
 
 	// 组合所有元素
 	panel.container = container.NewBorder(
 		container.NewVBox(panel.pathEntry, toolbar, panel.progressBar),
 		nil, nil, nil,
-		panel.list,
+		container.NewStack(panel.list, dropArea),
 	)
 
 	// 初始加载文件列表
@@ -202,13 +271,13 @@ func (p *FilePanel) RefreshFiles() {
 }
 
 // SetTransferCallback 设置传输回调
-func (p *FilePanel) SetTransferCallback(callback func(source string, targetPanel *FilePanel)) {
+func (p *FilePanel) SetTransferCallback(callback func(source string, targetPanel *FilePanel, transferType transfer.TransferType)) {
 	p.onTransfer = callback
 }
 
 // HandleTransfer 处理文件传输
-func (p *FilePanel) HandleTransfer(sourcePath string) error {
-	return p.transferMgr.Transfer(sourcePath, p.GetCurrentPath(), transfer.Copy)
+func (p *FilePanel) HandleTransfer(sourcePath string, transferType transfer.TransferType) error {
+	return p.transferMgr.Transfer(sourcePath, p.GetCurrentPath(), transferType)
 }
 
 // formatSize 格式化文件大小显示

@@ -17,12 +17,13 @@ const (
 
 // TransferProgress 传输进度信息
 type TransferProgress struct {
-	TotalSize    int64   // 总大小
+	TotalSize      int64   // 总大小
 	TransferredSize int64   // 已传输大小
-	Percentage   float64 // 完成百分比
-	CurrentFile  string  // 当前传输的文件
-	IsCompleted  bool    // 是否完成
-	Error        error   // 传输错误
+	Percentage     float64 // 完成百分比
+	CurrentFile    string  // 当前传输的文件
+	IsCompleted    bool    // 是否完成
+	Error          error   // 传输错误
+	TransferType   TransferType // 传输类型
 }
 
 // TransferManager 文件传输管理器
@@ -47,6 +48,22 @@ func (tm *TransferManager) Transfer(src, dst string, transferType TransferType) 
 
 	// 创建目标路径
 	dstPath := filepath.Join(dst, filepath.Base(src))
+
+	// 如果是移动操作，先尝试直接重命名
+	if transferType == Move {
+		if err := os.Rename(src, dstPath); err == nil {
+			// 重命名成功，直接返回
+			if tm.onProgress != nil {
+				tm.onProgress(TransferProgress{
+					CurrentFile:  filepath.Base(src),
+					IsCompleted: true,
+					TransferType: transferType,
+				})
+			}
+			return nil
+		}
+		// 如果重命名失败（可能跨设备），继续使用复制+删除的方式
+	}
 
 	// 如果是目录，递归复制
 	if srcInfo.IsDir() {
@@ -131,6 +148,7 @@ func (tm *TransferManager) transferFile(src, dst string, transferType TransferTy
 					Percentage:      percentage,
 					CurrentFile:     filepath.Base(src),
 					IsCompleted:     transferred == srcInfo.Size(),
+					TransferType:    transferType,
 				})
 			}
 		},
@@ -153,10 +171,10 @@ func (tm *TransferManager) transferFile(src, dst string, transferType TransferTy
 
 // ProgressReader 用于跟踪复制进度的读取器
 type ProgressReader struct {
-	reader     io.Reader
-	size       int64
+	reader      io.Reader
+	size        int64
 	transferred int64
-	onProgress func(int64)
+	onProgress  func(int64)
 }
 
 // Read 实现io.Reader接口

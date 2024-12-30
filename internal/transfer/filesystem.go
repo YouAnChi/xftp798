@@ -1,7 +1,6 @@
 package transfer
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,27 +38,30 @@ func NewFileSystem(initialPath string) *FileSystem {
 
 // ListFiles 列出指定目录下的所有文件和文件夹
 func (fs *FileSystem) ListFiles(path string) ([]FileInfo, error) {
-	files, err := ioutil.ReadDir(path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
 
 	var fileInfos []FileInfo
-	for _, file := range files {
-		info := FileInfo{
-			Name:    file.Name(),
-			Path:    filepath.Join(path, file.Name()),
-			Size:    file.Size(),
-			IsDir:   file.IsDir(),
-			ModTime: file.ModTime(),
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		
+		fileInfo := FileInfo{
+			Name:    entry.Name(),
+			Path:    filepath.Join(path, entry.Name()),
+			Size:    info.Size(),
+			IsDir:   entry.IsDir(),
+			ModTime: info.ModTime(),
 		}
 		
 		// 获取文件权限
-		if stat, err := os.Stat(info.Path); err == nil {
-			info.Permissions = stat.Mode().String()
-		}
+		fileInfo.Permissions = info.Mode().String()
 		
-		fileInfos = append(fileInfos, info)
+		fileInfos = append(fileInfos, fileInfo)
 	}
 
 	return fileInfos, nil
@@ -82,5 +84,13 @@ func (fs *FileSystem) GetCurrentPath() string {
 
 // SetCurrentPath 设置当前路径
 func (fs *FileSystem) SetCurrentPath(path string) {
+	if path == "" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			path = homeDir
+		} else {
+			path = "/"
+		}
+	}
 	fs.currentPath = path
 }
