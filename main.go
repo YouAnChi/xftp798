@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 )
 
 func main() {
@@ -14,8 +15,21 @@ func main() {
 	window := myApp.NewWindow("XFTP文件传输")
 
 	// 创建左右文件面板
-	localPanel := gui.NewFilePanel()
-	remotePanel := gui.NewFilePanel()
+	localPanel := gui.NewFilePanel(window)
+	remotePanel := gui.NewFilePanel(window)
+
+	// 设置传输回调
+	localPanel.SetTransferCallback(func(source string, sourcePanel *gui.FilePanel) {
+		if err := remotePanel.HandleTransfer(source); err != nil {
+			dialog.ShowError(err, window)
+		}
+	})
+
+	remotePanel.SetTransferCallback(func(source string, sourcePanel *gui.FilePanel) {
+		if err := localPanel.HandleTransfer(source); err != nil {
+			dialog.ShowError(err, window)
+		}
+	})
 
 	// 创建分割面板
 	split := container.NewHSplit(
