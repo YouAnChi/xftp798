@@ -25,6 +25,7 @@ type FilePanel struct {
 	progressBar  *widget.ProgressBar
 	transferMgr  *transfer.TransferManager
 	onTransfer   func(source string, targetPanel *FilePanel, transferType transfer.TransferType)
+	remoteFS     transfer.RemoteFS
 }
 
 // NewFilePanel 创建新的文件面板
@@ -113,6 +114,31 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 
 	// 创建工具栏
 	toolbar := widget.NewToolbar(
+		// 添加连接按钮
+		widget.NewToolbarAction(theme.ComputerIcon(), func() {
+			dialog := NewConnectDialog(panel.window, func(config *transfer.SFTPConfig) {
+				// 创建SFTP文件系统
+				remoteFS := transfer.NewSFTPFileSystem(config)
+				
+				// 连接服务器
+				if err := remoteFS.Connect(); err != nil {
+					dialog.ShowError(err, panel.window)
+					return
+				}
+
+				// 保存远程文件系统
+				if panel.remoteFS != nil {
+					panel.remoteFS.Close()
+				}
+				panel.remoteFS = remoteFS
+				panel.fileSystem.SetRemoteFS(remoteFS)
+
+				// 切换到远程根目录
+				panel.SetPath("/")
+			})
+			dialog.Show()
+		}),
+		widget.NewToolbarSeparator(),
 		// 添加返回上一级按钮
 		widget.NewToolbarAction(theme.NavigateBackIcon(), func() {
 			currentPath := panel.fileSystem.GetCurrentPath()
@@ -261,7 +287,49 @@ func (p *FilePanel) SetTransferCallback(callback func(source string, targetPanel
 
 // HandleTransfer 处理文件传输
 func (p *FilePanel) HandleTransfer(sourcePath string, transferType transfer.TransferType) error {
-	return p.transferMgr.Transfer(sourcePath, p.GetCurrentPath(), transferType)
+	// 获取目标路径
+	targetPath := filepath.Join(p.GetCurrentPath(), filepath.Base(sourcePath))
+
+	// 根据传输类型处理
+	switch transferType {
+	case transfer.Copy:
+		if p.remoteFS != nil {
+			// 如果目标是远程的，执行上传
+			return p.remoteFS.UploadFile(sourcePath, targetPath, func(current, total int64) {
+				p.progressBar.Value = float64(current) / float64(total)
+				p.progressBar.Show()
+				if current == total {
+					p.progressBar.Hide()
+					p.RefreshFiles()
+				}
+			})
+		} else {
+			// 如果源是远程的，执行下载
+			sourcePanel := p.getSourcePanel()
+			if sourcePanel != nil && sourcePanel.remoteFS != nil {
+				return sourcePanel.remoteFS.DownloadFile(sourcePath, targetPath, func(current, total int64) {
+					p.progressBar.Value = float64(current) / float64(total)
+					p.progressBar.Show()
+					if current == total {
+						p.progressBar.Hide()
+						p.RefreshFiles()
+					}
+				})
+			}
+			return fmt.Errorf("不支持本地文件传输")
+		}
+	case transfer.Move:
+		// 移动文件（暂不实现）
+		return fmt.Errorf("暂不支持移动文件")
+	default:
+		return fmt.Errorf("未知的传输类型")
+	}
+}
+
+// getSourcePanel 获取源面板
+func (p *FilePanel) getSourcePanel() *FilePanel {
+	// 这里需要实现获取源面板的逻辑
+	return nil
 }
 
 // formatSize 格式化文件大小显示

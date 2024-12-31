@@ -7,79 +7,49 @@ import (
 	"time"
 )
 
-// FileInfo 存储文件信息
+// FileInfo 文件信息
 type FileInfo struct {
-	Name         string    // 文件名
-	Path         string    // 完整路径
-	Size         int64     // 文件大小
-	IsDir        bool      // 是否是目录
-	ModTime      time.Time // 修改时间
-	Permissions  string    // 权限
+	Name    string
+	Path    string
+	Size    int64
+	ModTime time.Time
+	IsDir   bool
 }
 
-// FileSystem 提供文件系统操作接口
+// FileSystem 文件系统接口
 type FileSystem struct {
 	currentPath string
+	remote      RemoteFS
 }
 
-// NewFileSystem 创建新的文件系统处理器
-func NewFileSystem(initialPath string) *FileSystem {
-	if initialPath == "" {
+// RemoteFS 远程文件系统接口
+type RemoteFS interface {
+	ListFiles(path string) ([]FileInfo, error)
+	CreateDirectory(path string) error
+	DeleteFile(path string) error
+	UploadFile(localPath, remotePath string, progress func(current, total int64)) error
+	DownloadFile(remotePath, localPath string, progress func(current, total int64)) error
+	Close()
+}
+
+// NewFileSystem 创建新的文件系统
+func NewFileSystem(path string) *FileSystem {
+	if path == "" {
 		homeDir, err := os.UserHomeDir()
 		if err == nil {
-			initialPath = homeDir
+			path = homeDir
 		} else {
-			initialPath = "/"
+			path = "/"
 		}
 	}
 	return &FileSystem{
-		currentPath: initialPath,
+		currentPath: path,
 	}
 }
 
-// ListFiles 列出指定目录下的所有文件和文件夹
-func (fs *FileSystem) ListFiles(path string) ([]FileInfo, error) {
-	fmt.Printf("尝试读取目录: %s\n", path)
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		fmt.Printf("读取目录错误: %v\n", err)
-		return nil, err
-	}
-
-	var fileInfos []FileInfo
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			fmt.Printf("获取文件信息错误: %s - %v\n", entry.Name(), err)
-			continue
-		}
-		
-		fileInfo := FileInfo{
-			Name:    entry.Name(),
-			Path:    filepath.Join(path, entry.Name()),
-			Size:    info.Size(),
-			IsDir:   entry.IsDir(),
-			ModTime: info.ModTime(),
-		}
-		
-		// 获取文件权限
-		fileInfo.Permissions = info.Mode().String()
-		
-		fileInfos = append(fileInfos, fileInfo)
-	}
-
-	fmt.Printf("成功读取 %d 个文件\n", len(fileInfos))
-	return fileInfos, nil
-}
-
-// CreateDirectory 创建新目录
-func (fs *FileSystem) CreateDirectory(path string) error {
-	return os.MkdirAll(path, 0755)
-}
-
-// DeleteFile 删除文件或目录
-func (fs *FileSystem) DeleteFile(path string) error {
-	return os.RemoveAll(path)
+// SetRemoteFS 设置远程文件系统
+func (fs *FileSystem) SetRemoteFS(remote RemoteFS) {
+	fs.remote = remote
 }
 
 // GetCurrentPath 获取当前路径
@@ -89,13 +59,51 @@ func (fs *FileSystem) GetCurrentPath() string {
 
 // SetCurrentPath 设置当前路径
 func (fs *FileSystem) SetCurrentPath(path string) {
-	if path == "" {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			path = homeDir
-		} else {
-			path = "/"
-		}
-	}
 	fs.currentPath = path
+}
+
+// ListFiles 列出目录下的文件
+func (fs *FileSystem) ListFiles(path string) ([]FileInfo, error) {
+	// 如果有远程文件系统，使用远程文件系统
+	if fs.remote != nil {
+		return fs.remote.ListFiles(path)
+	}
+
+	// 否则使用本地文件系统
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取目录失败: %v", err)
+	}
+
+	files := make([]FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, FileInfo{
+			Name:    entry.Name(),
+			Path:    filepath.Join(path, entry.Name()),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			IsDir:   entry.IsDir(),
+		})
+	}
+	return files, nil
+}
+
+// CreateDirectory 创建目录
+func (fs *FileSystem) CreateDirectory(path string) error {
+	if fs.remote != nil {
+		return fs.remote.CreateDirectory(path)
+	}
+	return os.MkdirAll(path, 0755)
+}
+
+// DeleteFile 删除文件或目录
+func (fs *FileSystem) DeleteFile(path string) error {
+	if fs.remote != nil {
+		return fs.remote.DeleteFile(path)
+	}
+	return os.Remove(path)
 }
