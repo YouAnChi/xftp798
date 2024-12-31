@@ -7,11 +7,12 @@ import (
 	"xftp798/internal/transfer"
 
 	"fyne.io/fyne/v2"
-	//"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"image/color"
 )
 
 // FilePanel 表示文件面板
@@ -42,6 +43,13 @@ type FileListItem struct {
 	selected bool
 }
 
+// FileListItemRenderer 自定义列表项渲染器
+type FileListItemRenderer struct {
+	item      *FileListItem
+	container *fyne.Container
+	bg        *canvas.Rectangle
+}
+
 // NewFileListItem 创建新的列表项
 func NewFileListItem(panel *FilePanel, file transfer.FileInfo, index int) *FileListItem {
 	item := &FileListItem{
@@ -67,18 +75,71 @@ func NewFileListItem(panel *FilePanel, file transfer.FileInfo, index int) *FileL
 
 // CreateRenderer 创建渲染器
 func (i *FileListItem) CreateRenderer() fyne.WidgetRenderer {
-	container := container.NewHBox(i.icon, i.name, i.size, i.modTime)
-	return widget.NewSimpleRenderer(container)
+	// 创建背景，使用主色调并设置透明度
+	primaryColor := theme.PrimaryColor()
+	r, g, b, _ := primaryColor.RGBA()
+	bgColor := &color.NRGBA{
+		R: uint8(r >> 8),
+		G: uint8(g >> 8),
+		B: uint8(b >> 8),
+		A: 76, // 透明度 30%（76/255 ≈ 0.3）
+	}
+	bg := canvas.NewRectangle(bgColor)
+	bg.Hide()
+
+	// 创建内容容器，添加内边距
+	content := container.NewHBox(i.icon, i.name, i.size, i.modTime)
+	container := container.NewPadded(content)
+
+	// 创建渲染器
+	renderer := &FileListItemRenderer{
+		item:      i,
+		container: container,
+		bg:        bg,
+	}
+
+	return renderer
+}
+
+// MinSize 实现渲染器接口
+func (r *FileListItemRenderer) MinSize() fyne.Size {
+	return r.container.MinSize()
+}
+
+// Layout 实现渲染器接口
+func (r *FileListItemRenderer) Layout(size fyne.Size) {
+	r.bg.Resize(size)
+	r.container.Resize(size)
+}
+
+// Refresh 实现渲染器接口
+func (r *FileListItemRenderer) Refresh() {
+	if r.item.selected {
+		r.bg.Show()
+	} else {
+		r.bg.Hide()
+	}
+	r.container.Refresh()
+}
+
+// Objects 实现渲染器接口
+func (r *FileListItemRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.bg, r.container}
+}
+
+// Destroy 实现渲染器接口
+func (r *FileListItemRenderer) Destroy() {
 }
 
 // Tapped 处理点击事件
 func (i *FileListItem) Tapped(_ *fyne.PointEvent) {
-	// 更新选中状态
+	i.panel.selectedItem = -1
+	i.panel.list.Refresh()
+
 	i.panel.selectedItem = i.index
 	i.selected = true
 	i.Refresh()
 
-	// 如果是目录，进入该目录
 	if i.file.IsDir {
 		i.panel.SetPath(i.file.Path)
 		i.panel.selectedItem = -1
@@ -89,12 +150,13 @@ func (i *FileListItem) Tapped(_ *fyne.PointEvent) {
 
 // TappedSecondary 处理右键点击事件
 func (i *FileListItem) TappedSecondary(e *fyne.PointEvent) {
-	// 更新选中状态
+	i.panel.selectedItem = -1
+	i.panel.list.Refresh()
+
 	i.panel.selectedItem = i.index
 	i.selected = true
 	i.Refresh()
 
-	// 显示右键菜单
 	i.panel.showContextMenu(i.file, e.AbsolutePosition)
 }
 
@@ -372,6 +434,7 @@ func (p *FilePanel) RefreshFiles() {
 		dialog.ShowError(err, p.window)
 		return
 	}
+	p.selectedItem = -1
 	p.currentFiles = files
 	p.list.Refresh()
 }
@@ -383,14 +446,11 @@ func (p *FilePanel) SetTransferCallback(callback func(source string, targetPanel
 
 // HandleTransfer 处理文件传输
 func (p *FilePanel) HandleTransfer(sourcePath string, transferType transfer.TransferType) error {
-	// 获取目标路径
 	targetPath := filepath.Join(p.GetCurrentPath(), filepath.Base(sourcePath))
 
-	// 根据传输类型处理
 	switch transferType {
 	case transfer.Copy:
 		if p.remoteFS != nil {
-			// 如果目标是远程的，执行上传
 			return p.remoteFS.UploadFile(sourcePath, targetPath, func(current, total int64) {
 				p.progressBar.Value = float64(current) / float64(total)
 				p.progressBar.Show()
@@ -400,7 +460,6 @@ func (p *FilePanel) HandleTransfer(sourcePath string, transferType transfer.Tran
 				}
 			})
 		} else {
-			// 如果源是远程的，执行下载
 			sourcePanel := p.getSourcePanel()
 			if sourcePanel != nil && sourcePanel.remoteFS != nil {
 				return sourcePanel.remoteFS.DownloadFile(sourcePath, targetPath, func(current, total int64) {
@@ -415,7 +474,6 @@ func (p *FilePanel) HandleTransfer(sourcePath string, transferType transfer.Tran
 			return fmt.Errorf("不支持本地文件传输")
 		}
 	case transfer.Move:
-		// 移动文件（暂不实现）
 		return fmt.Errorf("暂不支持移动文件")
 	default:
 		return fmt.Errorf("未知的传输类型")
@@ -424,7 +482,6 @@ func (p *FilePanel) HandleTransfer(sourcePath string, transferType transfer.Tran
 
 // getSourcePanel 获取源面板
 func (p *FilePanel) getSourcePanel() *FilePanel {
-	// 这里需要实现获取源面板的逻辑
 	return nil
 }
 
