@@ -7,7 +7,6 @@ import (
 	"xftp798/internal/transfer"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
@@ -26,36 +25,6 @@ type FilePanel struct {
 	progressBar  *widget.ProgressBar
 	transferMgr  *transfer.TransferManager
 	onTransfer   func(source string, targetPanel *FilePanel, transferType transfer.TransferType)
-}
-
-// DropArea 自定义拖放区域
-type DropArea struct {
-	widget.BaseWidget
-	panel    *FilePanel
-	callback func(string)
-}
-
-// NewDropArea 创建新的拖放区域
-func NewDropArea(panel *FilePanel) *DropArea {
-	area := &DropArea{panel: panel}
-	area.ExtendBaseWidget(area)
-	return area
-}
-
-// CreateRenderer 实现 Widget 接口
-func (d *DropArea) CreateRenderer() fyne.WidgetRenderer {
-	rect := canvas.NewRectangle(theme.BackgroundColor())
-	return widget.NewSimpleRenderer(rect)
-}
-
-// Tapped 处理点击事件
-func (d *DropArea) Tapped(e *fyne.PointEvent) {
-	if d.panel.selectedItem >= 0 && d.panel.selectedItem < len(d.panel.currentFiles) {
-		file := d.panel.currentFiles[d.panel.selectedItem]
-		if d.panel.onTransfer != nil {
-			d.panel.onTransfer(file.Path, d.panel, transfer.Copy)
-		}
-	}
 }
 
 // NewFilePanel 创建新的文件面板
@@ -89,11 +58,11 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 	}
 
 	// 创建文件列表
-	panel.list = widget.NewList(
-		func() int {
+	panel.list = &widget.List{
+		Length: func() int {
 			return len(panel.currentFiles)
 		},
-		func() fyne.CanvasObject {
+		CreateItem: func() fyne.CanvasObject {
 			return container.NewHBox(
 				widget.NewIcon(theme.FileIcon()),
 				widget.NewLabel("文件名"),
@@ -101,14 +70,15 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 				widget.NewLabel("修改时间"),
 			)
 		},
-		func(id widget.ListItemID, item fyne.CanvasObject) {
+		UpdateItem: func(id widget.ListItemID, item fyne.CanvasObject) {
 			if id >= len(panel.currentFiles) {
 				return
 			}
 			file := panel.currentFiles[id]
+			box := item.(*fyne.Container)
 
 			// 更新图标
-			icon := item.(*fyne.Container).Objects[0].(*widget.Icon)
+			icon := box.Objects[0].(*widget.Icon)
 			if file.IsDir {
 				icon.SetResource(theme.FolderIcon())
 			} else {
@@ -116,27 +86,40 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 			}
 
 			// 更新文件信息
-			item.(*fyne.Container).Objects[1].(*widget.Label).SetText(file.Name)
-			item.(*fyne.Container).Objects[2].(*widget.Label).SetText(formatSize(file.Size))
-			item.(*fyne.Container).Objects[3].(*widget.Label).SetText(file.ModTime.Format("2006-01-02 15:04:05"))
-		},
-	)
+			nameLabel := box.Objects[1].(*widget.Label)
+			sizeLabel := box.Objects[2].(*widget.Label)
+			timeLabel := box.Objects[3].(*widget.Label)
 
-	// 设置列表选择事件
-	panel.list.OnSelected = func(id widget.ListItemID) {
-		panel.selectedItem = int(id)
-		if id >= len(panel.currentFiles) {
-			return
-		}
-		file := panel.currentFiles[id]
-		if file.IsDir {
-			panel.SetPath(file.Path)
+			nameLabel.SetText(file.Name)
+			sizeLabel.SetText(formatSize(file.Size))
+			timeLabel.SetText(file.ModTime.Format("2006-01-02 15:04:05"))
+		},
+		OnSelected: func(id widget.ListItemID) {
+			panel.selectedItem = int(id)
+			if id >= len(panel.currentFiles) {
+				return
+			}
+			file := panel.currentFiles[id]
+			if file.IsDir {
+				panel.SetPath(file.Path)
+				panel.selectedItem = -1
+				panel.list.UnselectAll()
+			}
+		},
+		OnUnselected: func(id widget.ListItemID) {
 			panel.selectedItem = -1
-		}
+		},
 	}
 
 	// 创建工具栏
 	toolbar := widget.NewToolbar(
+		// 添加返回上一级按钮
+		widget.NewToolbarAction(theme.NavigateBackIcon(), func() {
+			currentPath := panel.fileSystem.GetCurrentPath()
+			parentPath := filepath.Dir(currentPath)
+			panel.SetPath(parentPath)
+		}),
+		widget.NewToolbarSeparator(),
 		widget.NewToolbarAction(theme.ViewRefreshIcon(), func() {
 			panel.RefreshFiles()
 		}),
@@ -226,14 +209,15 @@ func NewFilePanel(window fyne.Window) *FilePanel {
 		}),
 	)
 
-	// 创建拖放区域
-	dropArea := NewDropArea(panel)
-
 	// 组合所有元素
 	panel.container = container.NewBorder(
-		container.NewVBox(panel.pathEntry, toolbar, panel.progressBar),
+		container.NewVBox(
+			panel.pathEntry,
+			toolbar,
+			panel.progressBar,
+		),
 		nil, nil, nil,
-		container.NewStack(panel.list, dropArea),
+		container.NewScroll(panel.list),
 	)
 
 	// 初始加载文件列表

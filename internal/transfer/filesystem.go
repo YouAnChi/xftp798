@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -38,8 +39,10 @@ func NewFileSystem(initialPath string) *FileSystem {
 
 // ListFiles 列出指定目录下的所有文件和文件夹
 func (fs *FileSystem) ListFiles(path string) ([]FileInfo, error) {
+	fmt.Printf("尝试读取目录: %s\n", path)
 	entries, err := os.ReadDir(path)
 	if err != nil {
+		fmt.Printf("读取目录错误: %v\n", err)
 		return nil, err
 	}
 
@@ -47,6 +50,7 @@ func (fs *FileSystem) ListFiles(path string) ([]FileInfo, error) {
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
+			fmt.Printf("获取文件信息错误: %s - %v\n", entry.Name(), err)
 			continue
 		}
 		
@@ -64,6 +68,7 @@ func (fs *FileSystem) ListFiles(path string) ([]FileInfo, error) {
 		fileInfos = append(fileInfos, fileInfo)
 	}
 
+	fmt.Printf("成功读取 %d 个文件\n", len(fileInfos))
 	return fileInfos, nil
 }
 
