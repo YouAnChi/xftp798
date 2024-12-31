@@ -6,40 +6,42 @@ import (
 	"xftp798/internal/transfer"
 
 	"fyne.io/fyne/v2"
-
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
-// ConnectDialog 连接对话框
+// ConnectDialog 表示连接对话框
 type ConnectDialog struct {
-	window   fyne.Window
-	onSubmit func(*transfer.SFTPConfig)
+	window    fyne.Window
+	onConnect func(*transfer.SFTPConfig)
 }
 
 // NewConnectDialog 创建新的连接对话框
-func NewConnectDialog(window fyne.Window, onSubmit func(*transfer.SFTPConfig)) *ConnectDialog {
+func NewConnectDialog(window fyne.Window, onConnect func(*transfer.SFTPConfig)) *ConnectDialog {
 	return &ConnectDialog{
-		window:   window,
-		onSubmit: onSubmit,
+		window:    window,
+		onConnect: onConnect,
 	}
 }
 
-// Show 显示对话框
+// Show 显示连接对话框
 func (d *ConnectDialog) Show() {
-	// 创建输入框
+	// 创建输入框，设置更大的尺寸
 	hostEntry := widget.NewEntry()
-	hostEntry.SetPlaceHolder("服务器地址")
+	hostEntry.SetPlaceHolder("请输入服务器地址")
+	hostEntry.Resize(fyne.NewSize(300, 40))
 
 	portEntry := widget.NewEntry()
-	portEntry.SetPlaceHolder("端口号")
-	portEntry.SetText("22") // 默认SSH端口
+	portEntry.SetText("22")
+	portEntry.Resize(fyne.NewSize(300, 40))
 
 	usernameEntry := widget.NewEntry()
-	usernameEntry.SetPlaceHolder("用户名")
+	usernameEntry.SetPlaceHolder("请输入用户名")
+	usernameEntry.Resize(fyne.NewSize(300, 40))
 
 	passwordEntry := widget.NewPasswordEntry()
-	passwordEntry.SetPlaceHolder("密码")
+	passwordEntry.SetPlaceHolder("请输入密码")
+	passwordEntry.Resize(fyne.NewSize(300, 40))
 
 	// 创建表单项
 	items := []*widget.FormItem{
@@ -50,30 +52,29 @@ func (d *ConnectDialog) Show() {
 	}
 
 	// 创建对话框
-	dialog.ShowForm("连接到服务器", "连接", "取消", items,
+	formDialog := dialog.NewForm(
+		"连接到服务器",
+		"连接",
+		"取消",
+		items,
 		func(confirm bool) {
 			if !confirm {
 				return
 			}
 
 			// 验证输入
-			if hostEntry.Text == "" {
-				dialog.ShowError(fmt.Errorf("请输入服务器地址"), d.window)
-				return
-			}
-			if usernameEntry.Text == "" {
-				dialog.ShowError(fmt.Errorf("请输入用户名"), d.window)
-				return
-			}
-			if passwordEntry.Text == "" {
-				dialog.ShowError(fmt.Errorf("请输入密码"), d.window)
+			if hostEntry.Text == "" || portEntry.Text == "" || usernameEntry.Text == "" || passwordEntry.Text == "" {
+				dialog.ShowError(
+					fmt.Errorf("所有字段都必须填写"),
+					d.window,
+				)
 				return
 			}
 
-			// 解析端口号
+			// 验证端口号
 			port, err := strconv.Atoi(portEntry.Text)
 			if err != nil {
-				dialog.ShowError(fmt.Errorf("端口号无效"), d.window)
+				dialog.ShowError(fmt.Errorf("端口号必须是数字"), d.window)
 				return
 			}
 
@@ -85,11 +86,16 @@ func (d *ConnectDialog) Show() {
 				Password: passwordEntry.Text,
 			}
 
-			// 回调
-			if d.onSubmit != nil {
-				d.onSubmit(config)
-			}
+			// 调用回调
+			d.onConnect(config)
+
+			// 清空密码
+			passwordEntry.SetText("")
 		},
 		d.window,
 	)
+
+	// 设置对话框大小
+	formDialog.Resize(fyne.NewSize(400, 300))
+	formDialog.Show()
 }
