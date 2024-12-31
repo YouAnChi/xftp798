@@ -29,7 +29,7 @@ type RemoteFS interface {
 	DeleteFile(path string) error
 	UploadFile(localPath, remotePath string, progress func(current, total int64)) error
 	DownloadFile(remotePath, localPath string, progress func(current, total int64)) error
-	Close()
+	Close() error // 修改Close方法签名
 }
 
 // NewFileSystem 创建新的文件系统
