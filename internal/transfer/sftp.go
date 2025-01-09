@@ -325,3 +325,11 @@ func (fs *SFTPFileSystem) DeleteFile(path string) error {
 	// 删除文件
 	return fs.sftpClient.Remove(path)
 }
+
+// RenameFile 重命名远程文件或目录
+func (fs *SFTPFileSystem) RenameFile(oldPath, newPath string) error {
+	if fs.sftpClient == nil {
+		return fmt.Errorf("SFTP客户端未连接")
+	}
+	return fs.sftpClient.Rename(oldPath, newPath)
+}

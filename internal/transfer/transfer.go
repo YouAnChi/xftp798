@@ -5,25 +5,58 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // TransferType 定义传输类型
 type TransferType int
 
 const (
-	Copy TransferType = iota
+	// Upload 上传文件
+	Upload TransferType = iota
+	// Download 下载文件
+	Download
+	// Copy 复制文件
+	Copy
+	// Move 移动文件
 	Move
 )
 
+// ProgressReader 用于跟踪复制进度的读取器
+type ProgressReader struct {
+	reader      io.Reader
+	size        int64
+	transferred int64
+	startTime   int64 // 开始时间（Unix时间戳）
+	onProgress  func(int64)
+}
+
+// Read 实现io.Reader接口
+func (pr *ProgressReader) Read(p []byte) (int, error) {
+	n, err := pr.reader.Read(p)
+	if n > 0 {
+		pr.transferred += int64(n)
+		if pr.onProgress != nil {
+			pr.onProgress(pr.transferred)
+		}
+	}
+	return n, err
+}
+
 // TransferProgress 传输进度信息
 type TransferProgress struct {
-	TotalSize      int64   // 总大小
-	TransferredSize int64   // 已传输大小
-	Percentage     float64 // 完成百分比
-	CurrentFile    string  // 当前传输的文件
-	IsCompleted    bool    // 是否完成
-	Error          error   // 传输错误
-	TransferType   TransferType // 传输类型
+	TotalSize       int64        // 总大小
+	TransferredSize int64        // 已传输大小
+	Percentage      float64      // 完成百分比
+	CurrentFile     string       // 当前传输的文件
+	IsCompleted     bool         // 是否完成
+	Error           error        // 传输错误
+	TransferType    TransferType // 传输类型
+	Speed           float64      // 传输速度（字节/秒）
+	TimeRemaining   float64      // 预计剩余时间（秒）
+	StartTime       int64        // 开始时间（Unix时间戳）
+	IsPaused        bool         // 是否暂停
+	Status          string       // 当前状态描述
 }
 
 // TransferManager 文件传输管理器
@@ -56,7 +89,7 @@ func (tm *TransferManager) Transfer(src, dst string, transferType TransferType) 
 			if tm.onProgress != nil {
 				tm.onProgress(TransferProgress{
 					CurrentFile:  filepath.Base(src),
-					IsCompleted: true,
+					IsCompleted:  true,
 					TransferType: transferType,
 				})
 			}
@@ -136,12 +169,26 @@ func (tm *TransferManager) transferFile(src, dst string, transferType TransferTy
 	defer dstFile.Close()
 
 	// 创建进度读取器
+	startTime := time.Now().Unix()
 	progressReader := &ProgressReader{
-		reader: srcFile,
-		size:   srcInfo.Size(),
+		reader:    srcFile,
+		size:      srcInfo.Size(),
+		startTime: startTime,
 		onProgress: func(transferred int64) {
 			if tm.onProgress != nil {
 				percentage := float64(transferred) / float64(srcInfo.Size()) * 100
+				currentTime := time.Now().Unix()
+				elapsedTime := currentTime - startTime
+				var speed float64
+				var timeRemaining float64
+
+				if elapsedTime > 0 {
+					speed = float64(transferred) / float64(elapsedTime)
+					if speed > 0 {
+						timeRemaining = float64(srcInfo.Size()-transferred) / speed
+					}
+				}
+
 				tm.onProgress(TransferProgress{
 					TotalSize:       srcInfo.Size(),
 					TransferredSize: transferred,
@@ -149,6 +196,11 @@ func (tm *TransferManager) transferFile(src, dst string, transferType TransferTy
 					CurrentFile:     filepath.Base(src),
 					IsCompleted:     transferred == srcInfo.Size(),
 					TransferType:    transferType,
+					Speed:           speed,
+					TimeRemaining:   timeRemaining,
+					StartTime:       startTime,
+					IsPaused:        false,
+					Status:          "transferring",
 				})
 			}
 		},
@@ -156,7 +208,7 @@ func (tm *TransferManager) transferFile(src, dst string, transferType TransferTy
 
 	// 复制文件内容
 	if _, err := io.Copy(dstFile, progressReader); err != nil {
-		return fmt.Errorf("复制文件内容失败: %v", err)
+		return fmt.Errorf("复制文件失败: %v", err)
 	}
 
 	// 如果是移动操作，删除源文件
@@ -167,24 +219,4 @@ func (tm *TransferManager) transferFile(src, dst string, transferType TransferTy
 	}
 
 	return nil
-}
-
-// ProgressReader 用于跟踪复制进度的读取器
-type ProgressReader struct {
-	reader      io.Reader
-	size        int64
-	transferred int64
-	onProgress  func(int64)
-}
-
-// Read 实现io.Reader接口
-func (pr *ProgressReader) Read(p []byte) (int, error) {
-	n, err := pr.reader.Read(p)
-	if n > 0 {
-		pr.transferred += int64(n)
-		if pr.onProgress != nil {
-			pr.onProgress(pr.transferred)
-		}
-	}
-	return n, err
 }
